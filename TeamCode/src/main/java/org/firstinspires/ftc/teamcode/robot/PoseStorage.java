@@ -1,6 +1,6 @@
 package org.firstinspires.ftc.teamcode.robot;
 
-import com.pedropathing.geometry.Pose;
+import com.pedropathing.math.Pose;
 
 public class PoseStorage {
     public static Pose currentPose = null;
