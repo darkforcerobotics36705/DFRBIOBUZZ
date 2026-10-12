@@ -107,4 +107,38 @@ public class Drivetrain {
     public void holdPoint(Pose targetPose) {
         follower.holdPoint(targetPose);
     }
+
+    public Command driveWith(Path path) {
+        return parallel(
+                // add parallel actions here
+                follower.followPath(path, true)
+        )
+    }
+    public void move(double y, double x, double yaw){ // teleop
+        follower.manual(y,x,yaw);
+        follower.update();
+    }
+    public double[] getPedroDistanceToHive(Pose currentPose, String allianceColor){
+        double[] Hive1 = {0.0, 0.0};
+        double[] Hive2 = {0.0, 0.0};
+
+        if (allianceColor.equals("red")){
+            Hive1 = new double[] {58.746, 24.076}; // replace with red hive coordinates
+            Hive2 = new double[] {58.746, 115.815};
+        }
+        else{
+            Hive1 = new double[] {82.754, 24.076}; // replace with blue hive coordinates
+            Hive2 = new double[] {82.754, 115.815};
+        }
+        double[] vector1 = {Hive1[0] - currentPose.getX(), Hive1[1] - currentPose.getY()};
+        double[] vector2 = {Hive2[0] - currentPose.getX(), Hive2[1] - currentPose.getY()};
+        if (Math.hypot(vector1[0], vector1[1]) < Math.hypot(vector2[0], vector2[1])) {
+            return vector1;
+        }
+        else{
+            return vector2;
+        }
+    }
+
+
 }
