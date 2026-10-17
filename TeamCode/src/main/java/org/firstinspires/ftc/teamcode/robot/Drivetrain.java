@@ -1,10 +1,15 @@
 package org.firstinspires.ftc.teamcode.robot;
 
+import static com.pedropathing.ivy.commands.Commands.instant;
+import static com.pedropathing.ivy.commands.Commands.waitUntil;
+import static com.pedropathing.ivy.groups.Groups.parallel;
+import static com.pedropathing.ivy.groups.Groups.sequential;
 import static org.firstinspires.ftc.teamcode.auto.FarAuto.shootAngle;
 import com.pedropathing.api.PoseFactory;
 
 import com.pedropathing.geometry.BezierCurve;
 import com.pedropathing.geometry.BezierLine;
+import com.pedropathing.ivy.Command;
 import com.pedropathing.math.Pose;
 import com.pedropathing.paths.PathChain;
 import com.qualcomm.robotcore.hardware.HardwareMap;
@@ -108,16 +113,21 @@ public class Drivetrain {
         follower.holdPoint(targetPose);
     }
 
-    public Command driveWith(Path path) {
-        return parallel(
-                // add parallel actions here
-                follower.followPath(path, true)
-        )
+    public Command driveWith(PathChain path, Command... others) {
+        Command follow = sequential(
+                instant(() -> follower.followPath(path, true)),
+                waitUntil(() -> !follower.isBusy())
+        );
+
+        Command[] all = new Command[others.length + 1];
+        all[0] = follow;
+        System.arraycopy(others, 0, all, 1, others.length);
+        return parallel(all);
     }
-    public void move(double y, double x, double yaw){ // teleop
-        follower.manual(y,x,yaw);
-        follower.update();
-    }
+    // public void move(double y, double x, double yaw){ // teleop
+    //    follower.move(y,x,yaw);
+    //    follower.update();
+    //}
     public double[] getPedroDistanceToHive(Pose currentPose, String allianceColor){
         double[] Hive1 = {0.0, 0.0};
         double[] Hive2 = {0.0, 0.0};

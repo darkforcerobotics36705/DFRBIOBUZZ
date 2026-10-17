@@ -47,6 +47,9 @@ import org.firstinspires.ftc.teamcode.robot.PoseStorage;
 import org.firstinspires.ftc.teamcode.robot.RobotHardware;
 import org.firstinspires.ftc.teamcode.robot.Drivetrain;
 import org.firstinspires.ftc.teamcode.robot.Vision;
+import org.firstinspires.ftc.teamcode.robot.Turret;
+import org.firstinspires.ftc.teamcode.robot.Storage;
+
 
 
 @TeleOp(name="CompTeleopBlue", group="OpMode")
@@ -63,15 +66,11 @@ public class CompTeleopBlue extends OpMode {
     public static double PUSH_START_POS = 0;
 
     public Boolean isStarted;
-    public Command driveCommand(){
-        return run(() -> {
-
+    private void driveCommand(double yaw){
             double axial = -gamepad1.left_stick_y;
             double lateral = gamepad1.left_stick_x;
-            double yaw = gamepad1.right_stick_x;
 
             drivetrain.drive(axial, lateral, yaw);
-        });
     }
     //CHANGE FOR BIOBUZZ
     private enum AutoDriveState {
@@ -111,8 +110,6 @@ public class CompTeleopBlue extends OpMode {
         vision.init();
         turret = new Turret(robot);
         storage = new Storage(robot);
-
-        drivetrain.setDefaultCommand(driveCommand());
 
         telemetry.addData("Status: ", "Initialized");
         telemetry.update();
@@ -194,7 +191,7 @@ public class CompTeleopBlue extends OpMode {
                 double axial = -gamepad1.left_stick_y;
                 double lateral = gamepad1.left_stick_x;
                 yaw = vision.getYaw(gamepad1.right_stick_x, gamepad1.left_bumper, result);
-                drivecommand();
+                driveCommand(yaw);
                 break;
 
             case DRIVING_TO_SHOOT:
@@ -213,7 +210,7 @@ public class CompTeleopBlue extends OpMode {
             case LOCKING_ON:
                 if (!vision.isLockedOn()) {
                     yaw = vision.getYaw(0.0, true, result);
-                    drivecommand();
+                    driveCommand(yaw);
                     telemetry.addLine("Aligning");
                 } else {
                     telemetry.addLine("Locked On");
