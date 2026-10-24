@@ -4,4 +4,10 @@ import com.pedropathing.math.Pose;
 
 public class PoseStorage {
     public static Pose currentPose = null;
+    public void updatePoseStoragePose(Pose currPose) {
+        currentPose = currPose;
+    }
+    public Pose getPosestoragePose(){
+        return currentPose;
+    }
 }
