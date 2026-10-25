@@ -1,24 +1,37 @@
 package org.firstinspires.ftc.teamcode.robot;
+
+import static org.firstinspires.ftc.robotcore.external.BlocksOpModeCompanion.telemetry;
+
+import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
+
+import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
+
+import java.util.List;
+
+
 public class HiveVision {
-//variables
+
+    private RobotHardware robot;
 
 //DO NOT DECLARE MOTORS HERE
 // when calling motors, use robot.MOTORNAME.setPower or smth
 
 public HiveVision (RobotHardware robot) {
         this.robot = robot;
+
     }
 
     private void getAllResults() {
-        limelight.setPipeline(0);
+        robot.limelight.pipelineSwitch(0);
 
-        LLResult result = limelight.getLatestResult();
+        LLResult result = robot.limelight.getLatestResult();
 
         if (result != null && result.isValid()) {
 
-            List<FiducialResult> fiducials = result.getFiducialResults();
+            List<LLResultTypes.FiducialResult> fiducials = result.getFiducialResults();
 
-            for (FiducialResult fiducial : fiducials) {
+            for (LLResultTypes.FiducialResult fiducial : fiducials) {
                 int tagId = fiducial.getFiducialId(); // Retrieve AprilTag ID
 
                 if (tagId == 1) {
@@ -26,7 +39,8 @@ public HiveVision (RobotHardware robot) {
                     double ty = fiducial.getTargetYDegrees();
 
                 } else if (tagId == 2) {
-                    double distance = fiducial.getRobotPoseTargetSpace()[2]; // Z-axis distance
+                    double distance = fiducial.getRobotPoseTargetSpace()
+                            .getPosition().z;
 
                 } else {
                     // Handle other tags
@@ -54,10 +68,11 @@ public HiveVision (RobotHardware robot) {
     }
 
     public String getHiveTipState() {
-        return hiveTipState; //hiveTipState is either “GARDEN_SIDE” or “OPPOSITE_GARDEN”
+        String hiveTipState;
+        //hiveTipState is either “GARDEN_SIDE” or “OPPOSITE_GARDEN”
     }
 
     public Pose3D getAverageBotPose() {
-        //return averaged botposes
+
     }
 }
