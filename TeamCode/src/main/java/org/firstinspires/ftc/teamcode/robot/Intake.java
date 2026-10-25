@@ -24,21 +24,21 @@ public class Intake {
      * Convenience method to pull game elements into the robot at full power.
      */
     public void intake() {
-        setPower(1.0);
+        setPower(RobotConfig.INTAKE_INTAKE_POWER);
     }
 
     /**
      * Convenience method to reverse/outtake game elements at full power.
      */
     public void outtake() {
-        setPower(-1.0);
+        setPower(RobotConfig.INTAKE_OUTAKE_POWER);
     }
 
     /**
      * Stop the intake motor.
      */
     public void stop() {
-        setPower(0.0);
+        setPower(RobotConfig.INTAKE_STOP_POWER);
     }
 
     /**
