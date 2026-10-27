@@ -8,16 +8,19 @@ import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
 
 import java.util.List;
+import java.util.ArrayList;
 
+public class TagData {
+    public int id;
+    public double tx;
+    public double ty;
+    public double distance;
 
 public class HiveVision {
 
     private RobotHardware robot;
 
-//DO NOT DECLARE MOTORS HERE
-// when calling motors, use robot.MOTORNAME.setPower or smth
-
-public HiveVision (RobotHardware robot) {
+    public HiveVision(RobotHardware robot) {
         this.robot = robot;
 
     }
@@ -34,17 +37,28 @@ public HiveVision (RobotHardware robot) {
             for (LLResultTypes.FiducialResult fiducial : fiducials) {
                 int tagId = fiducial.getFiducialId(); // Retrieve AprilTag ID
 
-                if (tagId == 1) {
+                //red (audience side)
+                if (tagId == 34 || tagId == 35 || tagId == 36 || tagId == 37) {
                     double tx = fiducial.getTargetXDegrees();
                     double ty = fiducial.getTargetYDegrees();
+                    telemetry.addData("Target", "(Target " + tagId + ")");
 
-                } else if (tagId == 2) {
+                    //blue (audience side)
+                } else if (tagId == 38 || tagId == 39 || tagId == 40 || tagId == 41) {
                     double distance = fiducial.getRobotPoseTargetSpace()
                             .getPosition().z;
+                    telemetry.addData("Target", "(Target " + tagId + ")");
 
+                    //blue (opp. side)
+                } else if (tagId == 42 || tagId == 43 || tagId == 44 || tagId == 45) {
+                    telemetry.addData("Target", "(Target " + tagId + ")");
+
+                    //red (opp. side)
+                } else if (tagId == 0 || tagId == 1 || tagId == 2 || tagId == 3) {
+                    telemetry.addData("Target", "(Target " + tagId + ")");
                 } else {
-                    // Handle other tags
-                    telemetry.addData("Seen Unhandled Tag ID", tagId);
+                    //catch other tags
+                    telemetry.addData("Target", "(Target " + tagId + ")");
                 }
             }
         }
@@ -55,12 +69,12 @@ public HiveVision (RobotHardware robot) {
     }
 
     public double getTargetHeading() {
-        //tx from custom defined point, transformed to field centric heading
+        double average = (tx + ty) / 2.0;
     }
 
     public void updateRead(String allianceColor) {
         //get latest results
-        //call updateHiveTipstate
+        call updateHiveTipState;
     }
 
     private void updateHiveTipState() {
@@ -73,6 +87,14 @@ public HiveVision (RobotHardware robot) {
     }
 
     public Pose3D getAverageBotPose() {
+        Pose3d.botPose = robot.limelight.botPose;
+        double x = botPose.getPosition().x;
+        double y = botPose.getPosition().y;
+        double z = botPose.getposition().z;
 
+        telemetry.addData("Robot X", x);
+        telemetry.addData("Robot Y", y);
+        telemetry.addData("Robot Z", z);
+        telemetry.update();
     }
 }
