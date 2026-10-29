@@ -13,17 +13,17 @@ public class Trigger {
 
 public void setPosition(double position) {
         if (robot != null && robot.triggerServo != null) {
-            robot.triggerServo.setPosition(position);
+            robot.triggerMotor.setPower(position);
         }
  public void trigger() {
-        setPosition(0.5);
+        robot.triggerMotor.setPower(RobotConfig.TRIGGER_FIRING_POWER);
     }
 
     /**
      * Convenience method to reset/retract the trigger mechanism.
      */
     public void reset() {
-        setPosition(0.0);
+        robot.triggerMotor.setPower(RobotConfig.TRIGGER_FIRING_POWER);
     }
 
     /**
@@ -32,7 +32,7 @@ public void setPosition(double position) {
      */
     public double getPosition() {
         if (robot != null && robot.triggerServo != null) {
-            return robot.triggerServo.getPosition();
+            return robot.triggerMotor.getPosition();
         }
         return 0.0;
     }
