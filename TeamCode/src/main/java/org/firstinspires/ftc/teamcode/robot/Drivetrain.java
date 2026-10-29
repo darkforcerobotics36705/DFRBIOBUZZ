@@ -1,21 +1,22 @@
 package org.firstinspires.ftc.teamcode.robot;
 
-import static com.pedropathing.ivy.commands.Commands.instant;
-import static com.pedropathing.ivy.commands.Commands.waitUntil;
+import static com.pedropathing.api.Paths.line;
 import static com.pedropathing.ivy.groups.Groups.parallel;
-import static com.pedropathing.ivy.groups.Groups.sequential;
-import static org.firstinspires.ftc.teamcode.auto.FarAuto.shootAngle;
-import com.pedropathing.api.PoseFactory;
 
-import com.pedropathing.geometry.BezierCurve;
-import com.pedropathing.geometry.BezierLine;
+import com.pedropathing.api.Paths;
+import com.pedropathing.api.PoseFactory;
+import com.pedropathing.paths.Path;
 import com.pedropathing.ivy.Command;
 import com.pedropathing.math.Pose;
-import com.pedropathing.paths.PathChain;
+
+import com.pedropathing.math.Vector2D;
+import com.pedropathing.math.Velocity;
+import com.pedropathing.paths.curves.bezier.BezierCurve;
+
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 import com.pedropathing.follower.Follower;
-import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
+import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 public class Drivetrain {
 
@@ -23,20 +24,13 @@ public class Drivetrain {
     public Follower follower;
     private final PoseFactory p = PoseFactory.degrees(); // add this
     public boolean autoDriving = false;
-    // CHANGE FOR BIOBUZZ
-    public final Pose CLOSE_BLUE_SHOOT_POSE = new Pose(82.8, 24.0, 1.57);
-    public final Pose CLOSE_BLUE_INTAKE_POSE = new Pose(109.9, 139.9, 0);
-    public final Pose FAR_BLUE_SHOOT_POSE = new Pose(82.8, 115.8, 4.71);
-    public final Pose CLOSE_RED_SHOOT_POSE = new Pose(58.7, 24.0,  1.57);
-    public final Pose CLOSE_RED_INTAKE_POSE = new Pose(31.1, 1.6, 3.14);
-    public final Pose FAR_RED_SHOOT_POSE = new Pose(58.7, 115.8, 4.71);
 
     public Drivetrain(RobotHardware robot) {
         this.robot = robot;
     }
 
     /** Call every loop with joystick inputs (and yaw already overridden if lock-on is active) */
-    public void drive(double axial, double lateral, double yaw) {
+    private void drive(double axial, double lateral, double yaw) {
         double frontLeftPower  = axial + lateral + yaw;
         double frontRightPower = axial - lateral - yaw;
         double backLeftPower   = axial - lateral + yaw;
@@ -59,58 +53,57 @@ public class Drivetrain {
         robot.backLeftDrive.setPower(backLeftPower);
         robot.backRightDrive.setPower(backRightPower);
     }
-    public void cancelAutoDrive() {
-        follower.breakFollowing();
+    private void cancelAutoDrive() {
+        follower.stop();
         autoDriving = false;
     }
 
-    public void stop() {
+    private void stop() {
         drive(0, 0, 0);
     }
 
-    public void driveForward(double power, long ms) throws InterruptedException {
+    private void driveForward(double power, long ms) throws InterruptedException {
         drive(power, 0, 0);
         Thread.sleep(ms);
         stop();
     }
 
     public void init(HardwareMap hardwareMap) {
-        follower = Constants.createFollower(hardwareMap);
+        follower = Constants.create(hardwareMap);
     }
 
-    public void startAutoDrive(Pose targetPose) {
+    private void startAutoDrive(Pose targetPose) {
         // Get current robot pose from Pedro's odometry
-        Pose currentPose = follower.getPose();
+        Pose currentPose = follower.pose();
 
         // Build a straight line path from here to the target
-        PathChain path = follower.pathBuilder()
-                .addPath(new BezierLine(currentPose, targetPose))
-                .setLinearHeadingInterpolation(currentPose.getHeading(), targetPose.getHeading())
-                .build();
-
-        follower.followPath(path, false);
+        Path path = Paths.line(currentPose, targetPose).linear(currentPose, targetPose);
+        follower.follow(path);
         autoDriving = true;
     }
 
-    public void startAutoDrive(Pose targetPose, Pose controlPoint) {
-        Pose currentPose = follower.getPose();
-        PathChain path = follower.pathBuilder()
-                .addPath(new BezierCurve(currentPose, controlPoint, targetPose))
-                .setLinearHeadingInterpolation(currentPose.getHeading(), targetPose.getHeading(), 0.6)
-                .build();
-        follower.followPath(path, true);
+    private void startAutoDrive(Pose targetPose, Pose controlPoint) {
+        Pose currentPose = follower.pose();
+        Path path = Paths.curve(currentPose, targetPose).linear(currentPose, targetPose);
+        follower.follow(path);
         autoDriving = true;
     }
 
-    public void initStartingPoint(Pose startPose) {
-        follower.setStartingPose(startPose);
-    }
-    public void holdPoint(Pose targetPose) {
-        follower.holdPoint(targetPose);
-    }
 
+    public Command startAutoDriveTo(Pose targetPose) {
+        return Command.build()
+                .setStart(() -> {
 
-    public Command driveWith(PathChain path, Command command1, Command command2){
+                    startAutoDrive(targetPose);
+                })
+                .setExecute(() -> {
+
+                })
+                .setDone(() -> {
+                    return !follower.isBusy() || ! autoDriving;
+                });
+    }
+    public Command driveWith(Command command1, Command command2){
         return parallel(
                 command1,
                 command2
@@ -123,7 +116,6 @@ public class Drivetrain {
 
             follower.manual(y, x, yaw);
 
-            follower.update();
         });
 
     }
@@ -139,8 +131,8 @@ public class Drivetrain {
             Hive1 = new double[] {82.754, 24.076}; // replace with blue hive coordinates
             Hive2 = new double[] {82.754, 115.815};
         }
-        double[] vector1 = {Hive1[0] - currentPose.getX(), Hive1[1] - currentPose.getY()};
-        double[] vector2 = {Hive2[0] - currentPose.getX(), Hive2[1] - currentPose.getY()};
+        double[] vector1 = {Hive1[0] - currentPose.x(), Hive1[1] - currentPose.y()};
+        double[] vector2 = {Hive2[0] - currentPose.x(), Hive2[1] - currentPose.y()};
         if (Math.hypot(vector1[0], vector1[1]) < Math.hypot(vector2[0], vector2[1])) {
             return vector1;
         }
@@ -148,6 +140,15 @@ public class Drivetrain {
             return vector2;
         }
     }
+    public double getRobotHeading(){return Math.toDegrees(follower.pose().heading());}
+    public double[] getRobotTranslationalVelocity(){
+        Velocity velocity = follower.velocity();
+        Vector2D vector = velocity.toVector2D();
+        double vx = vector.x();
+        double vy = vector.y();
+        return new double[] {vx, vy};
+    }
+
 
 
 }
