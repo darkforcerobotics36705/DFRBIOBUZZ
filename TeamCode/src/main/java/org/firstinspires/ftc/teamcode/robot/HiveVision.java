@@ -6,6 +6,7 @@ import com.qualcomm.hardware.limelightvision.LLResult;
 import com.qualcomm.hardware.limelightvision.LLResultTypes;
 
 import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
+import org.firstinspires.ftc.robotcore.external.navigation.Position;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -74,7 +75,7 @@ public class HiveVision {
 
     public void updateRead(String allianceColor) {
         //get latest results
-        call updateHiveTipState;
+        updateHiveTipState();
     }
 
     private void updateHiveTipState() {
@@ -87,14 +88,61 @@ public class HiveVision {
     }
 
     public Pose3D getAverageBotPose() {
-        Pose3d.botPose = robot.limelight.botPose;
-        double x = botPose.getPosition().x;
-        double y = botPose.getPosition().y;
-        double z = botPose.getposition().z;
+        final int samples = 10;
 
-        telemetry.addData("Robot X", x);
-        telemetry.addData("Robot Y", y);
-        telemetry.addData("Robot Z", z);
+        double totalX = 0;
+        double totalY = 0;
+        double totalZ = 0;
+
+        int validSamples = 0;
+        Pose3D latestPose = null;
+
+        for (int i = 0; i < samples; i++) {
+            LLResult result = robot.limelight.getLatestResult();
+
+            if (result == null || !result.isValid()) {
+                continue;
+            }
+
+            Pose3D pose = result.getBotpose();
+
+            if (pose == null || pose.getPosition() == null) {
+                continue;
+            }
+
+            totalX += pose.getPosition().x;
+            totalY += pose.getPosition().y;
+            totalZ += pose.getPosition().z;
+
+            latestPose = pose;
+            validSamples++;
+        }
+
+        if (validSamples == 0) {
+            telemetry.addLine("No valid Limelight readings");
+            telemetry.update();
+            return null;
+        }
+
+        double avgX = totalX / validSamples;
+        double avgY = totalY / validSamples;
+        double avgZ = totalZ / validSamples;
+
+        telemetry.addData("Average X", avgX);
+        telemetry.addData("Average Y", avgY);
+        telemetry.addData("Average Z", avgZ);
+        telemetry.addData("Valid Samples", validSamples);
         telemetry.update();
+
+        return new Pose3D(
+                new Position(
+                        latestPose.getPosition().unit,
+                        avgX,
+                        avgY,
+                        avgZ,
+                        latestPose.getPosition().acquisitionTime
+                ),
+                latestPose.getOrientation()
+        );
     }
 }
