@@ -1,284 +1,228 @@
 package org.firstinspires.ftc.teamcode.robot;
 
+import com.qualcomm.hardware.rev.RevColorSensorV3;
+import com.qualcomm.robotcore.hardware.DigitalChannel;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Locale;
 import java.util.Queue;
 
-/**
- * Sensor-only storage tracker for two lanes, four elements total.
- * Per lane: stacked BB1+BB2 at intake, one color sensor just after them,
- * and BB3 near the turret/shooter exit.
- *
- * Storage never sets motor power or LED output. Call checkBeamBreaks()
- * once per robot loop and pass the ACTUAL intake direction.
- */
+/** Tracks up to four elements in two lanes. Only directly controls the RGB light. */
 public class Storage {
     public enum Lane { LEFT, RIGHT }
     public enum IntakeState { FORWARD, REVERSE, STOPPED }
-
-    /** Connect these calls to the actual RobotHardware sensor fields. */
-    public interface Hardware {
-        boolean beamBroken(Lane lane, int beam); // 1, 2, or 3
-        String readColor(Lane lane);             // RED, BLUE, YELLOW, UNKNOWN
-    }
-
     private static final int CAPACITY = 4;
-    private static final long COLOR_GRACE_NS = 150_000_000L;
-
-    private static final class StoredElement {
+    private static final long COLOR_WAIT_NS = 150_000_000L; // 0.15 seconds
+    private static final double DETECT_DISTANCE_CM = 2.5;  // Calibrate on robot!
+    private static class Element {
         final Lane lane;
         final String color;
-        StoredElement(Lane lane, String color) {
-            this.lane = lane;
-            this.color = color;
-        }
+        Element(Lane lane, String color) { this.lane = lane; this.color = color; }
     }
 
-    private static final class LaneState {
-        boolean previousEntrance;
-        boolean previousExit;
-        boolean awaitingColor;
-        long colorDeadlineNs;
-        boolean rejected;
-        // During a reverse passage, a previously stored element can be removed
-        // only when its color is confirmed and the entrance subsequently clears.
-        boolean reversePassage;
-        boolean reverseMatchedStoredElement;
-        // An element rejected before counting must never remove a stored item.
-        boolean rejectedPassage;
+    private static class LaneState {
+        boolean previousEntrance, previousExit;
+        boolean waitingForColor, reject;
+        boolean reversePassage, rejectedPassage, reverseColorMatches;
+        long colorDeadline;
     }
 
-    private final Hardware robot;
+    private final RobotHardware robot;
     private final LaneState leftState = new LaneState();
     private final LaneState rightState = new LaneState();
-    private final Deque<StoredElement> leftQueue = new ArrayDeque<>();
-    private final Deque<StoredElement> rightQueue = new ArrayDeque<>();
-    private final Deque<StoredElement> arrivalOrder = new ArrayDeque<>();
+    private final Deque<Element> leftQueue = new ArrayDeque<>();
+    private final Deque<Element> rightQueue = new ArrayDeque<>();
+    private final Deque<Element> arrivalOrder = new ArrayDeque<>();
     private boolean emergencyOuttakeNeeded;
+    private int lastLightCount = -1;
 
-    public Storage(Hardware robot) {
-        if (robot == null) throw new IllegalArgumentException("Hardware cannot be null");
+    public Storage(RobotHardware robot) {
+        if (robot == null) throw new IllegalArgumentException("RobotHardware cannot be null");
         this.robot = robot;
+        updateStorageLight(); // Violet: empty storage
     }
 
-    /**
-     * UPDATE: Original required signature. Assumes forward movement.
-     * Use the IntakeState overload whenever the intake can reverse or stop.
-     */
+    // ------ Main update: call this EVERY robot loop ------
+
+    /** Required method. Use the overload with direction when intake may reverse. */
     public boolean checkBeamBreaks(String allianceColor) {
         return checkBeamBreaks(allianceColor, IntakeState.FORWARD);
     }
 
-    /**
-     * UPDATE: Backward-compatible overload. false means STOPPED/unknown,
-     * NOT reverse; use the IntakeState overload for reverse-exit detection.
-     */
-    public boolean checkBeamBreaks(String allianceColor, boolean forwardExitEnabled) {
-        return checkBeamBreaks(allianceColor,
-                forwardExitEnabled ? IntakeState.FORWARD : IntakeState.STOPPED);
-    }
-
-    /**
-     * UPDATE: Reads sensors, tracks incoming colors, and detects exits.
-     * Returns true when the main control code should reject an element.
-     */
-    public boolean checkBeamBreaks(String allianceColor, IntakeState intakeState) {
-        String alliance = normalize(allianceColor);
-        if (!"RED".equals(alliance) && !"BLUE".equals(alliance)) {
+    /** True means the MAIN CODE should command emergency outtake. */
+    public boolean checkBeamBreaks(String allianceColor, IntakeState direction) {
+        String alliance = allianceColor == null ? "" : allianceColor.trim().toUpperCase(Locale.US);
+        if (!alliance.equals("RED") && !alliance.equals("BLUE"))
             throw new IllegalArgumentException("Alliance must be RED or BLUE");
-        }
-        if (intakeState == null) throw new IllegalArgumentException("Intake state cannot be null");
+        if (direction == null) throw new IllegalArgumentException("Intake direction is required");
+
         long now = System.nanoTime();
-        processLane(Lane.LEFT, leftState, alliance, intakeState, now);
-        processLane(Lane.RIGHT, rightState, alliance, intakeState, now);
-        emergencyOuttakeNeeded = leftState.rejected || rightState.rejected;
+        updateLane(Lane.LEFT, leftState, alliance, direction, now);
+        updateLane(Lane.RIGHT, rightState, alliance, direction, now);
+        emergencyOuttakeNeeded = leftState.reject || rightState.reject;
+        updateStorageLight();
         return emergencyOuttakeNeeded;
     }
 
-    /** UPDATE: Processes one lane without commanding any other subsystem. */
-    private void processLane(Lane lane, LaneState state, String alliance,
-                             IntakeState direction, long now) {
-        boolean entrance = robot.beamBroken(lane, 1) || robot.beamBroken(lane, 2);
-        boolean exit = robot.beamBroken(lane, 3);
-        boolean entranceRising = entrance && !state.previousEntrance;
-        boolean entranceFalling = !entrance && state.previousEntrance;
+    private void updateLane(Lane lane, LaneState state, String alliance,
+                            IntakeState direction, long now) {
+        // Entrance beams are stacked and count as ONE detection location.
+        boolean entrance = beamBroken(lane, 1) || beamBroken(lane, 2);
+        boolean exit = beamBroken(lane, 3); // Near the turret
+        boolean justEntered = entrance && !state.previousEntrance;
+        boolean justClearedEntrance = !entrance && state.previousEntrance;
+        boolean justClearedExit = !exit && state.previousExit;
 
         if (direction == IntakeState.FORWARD) {
             state.reversePassage = false;
-            state.reverseMatchedStoredElement = false;
-            state.rejectedPassage = false;
+            if (justEntered && !state.reject) state.waitingForColor = true;
+            if (entrance && state.waitingForColor)
+                state.colorDeadline = now + COLOR_WAIT_NS;
 
-            if (entranceRising && !state.rejected) {
-                state.awaitingColor = true;
-                state.colorDeadlineNs = now + COLOR_GRACE_NS;
-            }
-            if (entrance && state.awaitingColor) {
-                state.colorDeadlineNs = now + COLOR_GRACE_NS;
-            }
-
-            // Color sensor is read only for an entrance-triggered candidate,
-            // or to verify that a previously rejected element has cleared.
-            if (state.awaitingColor) {
-                String color = normalize(robot.readColor(lane));
-                if (!"UNKNOWN".equals(color)) {
-                    state.awaitingColor = false;
-                    if (!isAllowed(color, alliance)) {
-                        state.rejected = true;
+            // Only read the REV color sensor after beam-break detection.
+            if (state.waitingForColor) {
+                String color = readColor(lane);
+                if (!color.equals("UNKNOWN")) {
+                    state.waitingForColor = false;
+                    if (!color.equals("YELLOW") && !color.equals(alliance)) {
+                        state.reject = true;
                     } else if (!isFull()) {
-                        StoredElement element = new StoredElement(lane, color);
-                        queueFor(lane).addLast(element);
+                        Element element = new Element(lane, color);
+                        laneQueue(lane).addLast(element);
                         arrivalOrder.addLast(element);
                     }
-                } else if (!entrance && now >= state.colorDeadlineNs) {
-                    state.awaitingColor = false;
-                    state.rejected = true;
+                } else if (!entrance && now >= state.colorDeadline) {
+                    state.waitingForColor = false;
+                    state.reject = true; // Element arrived but could not be identified
                 }
             }
-
-            // Do not clear rejection just because a sensor temporarily reads
-            // UNKNOWN. Rejection is cleared after a reverse exit is observed.
-            if (state.previousExit && !exit) {
-                removeForwardExit(lane);
-            }
+            if (justClearedExit) removeElement(lane, false);
         } else if (direction == IntakeState.REVERSE) {
-            // No new elements are added while reversing.
-            state.awaitingColor = false;
-            if (entranceRising) {
+            state.waitingForColor = false;
+            if (justEntered || (entrance && state.reject && !state.reversePassage)) {
                 state.reversePassage = true;
-                state.rejectedPassage = state.rejected;
-                state.reverseMatchedStoredElement = false;
+                state.rejectedPassage = state.reject;
+                state.reverseColorMatches = false;
             }
-
+            // Heuristic: color match + entrance clearing suggests a stored ball went out.
             if (state.reversePassage && entrance && !state.rejectedPassage) {
-                // Read only while entrance beams are blocked. If the color
-                // matches the newest stored element, it may be that element
-                // traveling backward, rather than an uncounted rejected ball.
-                StoredElement newest = queueFor(lane).peekLast();
-                if (newest != null) {
-                    String color = normalize(robot.readColor(lane));
-                    if (newest.color.equals(color)) {
-                        state.reverseMatchedStoredElement = true;
-                    }
-                }
+                Element newest = laneQueue(lane).peekLast();
+                if (newest != null && newest.color.equals(readColor(lane)))
+                    state.reverseColorMatches = true;
             }
-
-            if (entranceFalling && state.reversePassage) {
-                if (state.rejectedPassage) {
-                    // Rejected balls were never counted, so do not dequeue.
-                    state.rejected = false;
-                } else if (state.reverseMatchedStoredElement) {
-                    removeReverseExit(lane);
-                }
+            if (justClearedEntrance && state.reversePassage) {
+                if (state.rejectedPassage) state.reject = false;
+                else if (state.reverseColorMatches) removeElement(lane, true);
                 state.reversePassage = false;
-                state.reverseMatchedStoredElement = false;
-                state.rejectedPassage = false;
             }
-            // If a rejection began after the entrance was already blocked,
-            // recognize the existing blocked interval as its reverse passage.
-            if (entrance && state.rejected && !state.reversePassage) {
-                state.reversePassage = true;
-                state.rejectedPassage = true;
-            }
-        } else {
-            // STOPPED: do not infer movement or remove anything.
+        } else { // STOPPED
             state.reversePassage = false;
-            state.reverseMatchedStoredElement = false;
-            state.rejectedPassage = false;
         }
 
         state.previousEntrance = entrance;
         state.previousExit = exit;
     }
 
-    /** STATUS: True if any entrance beam (BB1/BB2) is blocked. */
+    // ------ Physical sensor readings ------
+
+    private boolean beamBroken(Lane lane, int number) {
+        DigitalChannel sensor;
+        if (lane == Lane.LEFT) {
+            sensor = number == 1 ? robot.leftBeam1 :
+                    number == 2 ? robot.leftBeam2 : robot.leftBeam3;
+        } else {
+            sensor = number == 1 ? robot.rightBeam1 :
+                    number == 2 ? robot.rightBeam2 : robot.rightBeam3;
+        }
+        // Adafruit 2167: LOW means broken, with appropriate 3.3V pull-up.
+        return !sensor.getState();
+    }
+
+    /** UNKNOWN means no close element or an unrecognized color. Calibrate thresholds. */
+    private String readColor(Lane lane) {
+        RevColorSensorV3 sensor = lane == Lane.LEFT ? robot.leftColor : robot.rightColor;
+        if (sensor.getDistance(DistanceUnit.CM) > DETECT_DISTANCE_CM) return "UNKNOWN";
+
+        double red = sensor.red(), green = sensor.green(), blue = sensor.blue();
+        if (red < 1 && green < 1 && blue < 1) return "UNKNOWN";
+        if (red > green * 1.4 && red > blue * 1.4) return "RED";
+        if (blue > red * 1.25 && blue > green * 1.15) return "BLUE";
+        if (red > blue * 1.3 && green > blue * 1.25 && red > green * 0.7)
+            return "YELLOW";
+        return "UNKNOWN";
+    }
+
+    // ------ Required and additional status methods ------
+
     public boolean anyIntakeBeamBroken() {
-        return robot.beamBroken(Lane.LEFT, 1) || robot.beamBroken(Lane.LEFT, 2)
-                || robot.beamBroken(Lane.RIGHT, 1) || robot.beamBroken(Lane.RIGHT, 2);
+        return beamBroken(Lane.LEFT, 1) || beamBroken(Lane.LEFT, 2)
+                || beamBroken(Lane.RIGHT, 1) || beamBroken(Lane.RIGHT, 2);
     }
 
-    /** STATUS: Copy of all stored colors in chronological arrival order. */
-    public Queue<String> getElementQueue() {
-        Queue<String> result = new ArrayDeque<>();
-        for (StoredElement element : arrivalOrder) result.add(element.color);
-        return result;
-    }
+    public Queue<String> getElementQueue() { return colorsFrom(arrivalOrder); }
+    public Queue<String> getElementQueue(Lane lane) { return colorsFrom(laneQueue(lane)); }
 
-    /** STATUS: Copy of one lane's colors, oldest first. */
-    public Queue<String> getElementQueue(Lane lane) {
+    private Queue<String> colorsFrom(Deque<Element> source) {
         Queue<String> result = new ArrayDeque<>();
-        for (StoredElement element : queueFor(lane)) result.add(element.color);
+        for (Element element : source) result.add(element.color);
         return result;
     }
 
     public int getStoredElements() { return arrivalOrder.size(); }
-    public int getCount(Lane lane) { return queueFor(lane).size(); }
+    public int getCount(Lane lane) { return laneQueue(lane).size(); }
     public boolean isFull() { return getStoredElements() >= CAPACITY; }
     public boolean needsEmergencyOuttake() { return emergencyOuttakeNeeded; }
 
-    /** STATUS: One goBILDA RGB light, showing the combined count. */
-    public String getStorageLightColor() {
-        switch (getStoredElements()) {
-            case 0: return "VIOLET";
-            case 1: return "BLUE";
-            case 2: return "GREEN";
-            case 3: return "YELLOW";
-            default: return "RED";
+    /** Actually updates the single goBILDA RGB indicator via RobotHardware. */
+    public void updateStorageLight() {
+        int count = getStoredElements();
+        if (count == lastLightCount) return;
+        double position;
+        switch (count) {
+            case 0: position = 0.700; break; // Violet
+            case 1: position = 0.611; break; // Blue
+            case 2: position = 0.500; break; // Green
+            case 3: position = 0.388; break; // Yellow
+            default: position = 0.280; break; // Red, at 4
         }
+        robot.rgbIndicator.setPosition(position);
+        lastLightCount = count;
     }
 
-    /** UPDATE: Only call if a forward exit is confirmed independently of BB3. */
-    public boolean recordForwardExit(Lane lane) { return removeForwardExit(lane); }
+    // ------ Remove elements / reset ------
 
-    private boolean removeForwardExit(Lane lane) {
-        StoredElement removed = queueFor(lane).pollFirst();
+    /** Only call for exits NOT already counted automatically at BB3. */
+    public boolean recordForwardExit(Lane lane) { return removeElement(lane, false); }
+    public boolean recordReverseExit(Lane lane) { return removeElement(lane, true); }
+
+    private boolean removeElement(Lane lane, boolean reverse) {
+        Deque<Element> queue = laneQueue(lane);
+        Element removed = reverse ? queue.pollLast() : queue.pollFirst();
         if (removed == null) return false;
         arrivalOrder.remove(removed);
+        updateStorageLight();
         return true;
     }
 
-    /** UPDATE: Manual confirmation of a backward exit (do not double-count). */
-    public boolean recordReverseExit(Lane lane) { return removeReverseExit(lane); }
-
-    private boolean removeReverseExit(Lane lane) {
-        StoredElement removed = queueFor(lane).pollLast();
-        if (removed == null) return false;
-        arrivalOrder.remove(removed);
-        return true;
-    }
-
-    /** UPDATE: Clear queues and sensor-tracking state. */
     public void reset() {
-        leftQueue.clear();
-        rightQueue.clear();
-        arrivalOrder.clear();
-        resetLane(leftState);
-        resetLane(rightState);
+        leftQueue.clear(); rightQueue.clear(); arrivalOrder.clear();
+        resetLane(leftState); resetLane(rightState);
         emergencyOuttakeNeeded = false;
+        lastLightCount = -1;
+        updateStorageLight();
     }
 
     private static void resetLane(LaneState state) {
-        state.previousEntrance = false;
-        state.previousExit = false;
-        state.awaitingColor = false;
-        state.colorDeadlineNs = 0L;
-        state.rejected = false;
-        state.reversePassage = false;
-        state.reverseMatchedStoredElement = false;
-        state.rejectedPassage = false;
+        state.previousEntrance = state.previousExit = false;
+        state.waitingForColor = state.reject = false;
+        state.reversePassage = state.rejectedPassage = state.reverseColorMatches = false;
+        state.colorDeadline = 0;
     }
 
-    private Deque<StoredElement> queueFor(Lane lane) {
+    private Deque<Element> laneQueue(Lane lane) {
         if (lane == Lane.LEFT) return leftQueue;
         if (lane == Lane.RIGHT) return rightQueue;
         throw new IllegalArgumentException("Lane must be LEFT or RIGHT");
-    }
-
-    private static boolean isAllowed(String color, String alliance) {
-        return "YELLOW".equals(color) || alliance.equals(color);
-    }
-
-    private static String normalize(String value) {
-        return value == null ? "UNKNOWN" : value.trim().toUpperCase(Locale.US);
     }
 }
