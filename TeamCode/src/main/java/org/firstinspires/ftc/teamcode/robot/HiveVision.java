@@ -71,6 +71,7 @@ public class HiveVision {
 
     public double getTargetHeading() {
         double average = (tx + ty) / 2.0;
+        return average;
     }
 
     public void updateRead(String allianceColor) {
