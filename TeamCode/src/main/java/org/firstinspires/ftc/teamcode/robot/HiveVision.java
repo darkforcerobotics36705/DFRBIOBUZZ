@@ -8,14 +8,11 @@ import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import java.util.List;
 import java.util.ArrayList;
 
-public class TagData {
-    public int id;
-    public double tx;
-    public double ty;
-    public double distance;
-
     public class HiveVision {
-
+        public int id;
+        public double tx;
+        public double ty;
+        public double distance;
         private RobotHardware robot;
 
         public HiveVision(RobotHardware robot) {
@@ -63,7 +60,17 @@ public class TagData {
         }
 
         public double getAverageTa() {
-            //average the areas
+            LLResult result = robot.limelight.getLatestResult();
+            if (result != null && result.isValid()) {
+                double targetArea = result.getTa();
+                //add the data
+                return targetArea;
+            }
+            //no apriltag visible
+            else {
+                telemetry.addData("Limelight", "no apriltags visible");
+                return 0;
+            }
         }
 
         public double getTargetHeading() {
@@ -168,4 +175,3 @@ public class TagData {
             );
         }
     }
-}
