@@ -78,18 +78,21 @@ import java.util.ArrayList;
             return average;
         }
 
-        public void updateRead(String allianceColor) {
+        public void updateRead (String allianceColor) {
             //get latest results
             getAllResults();
             updateHiveTipState();
         }
 
+
         private void updateHiveTipState() {
-            //compare average ta and probably better to use ty, with ID of the tags to determine which side of the field we are on, then update it
+            tx *= -1;
+            ty *= -1;
+            getAllResults();
         }
 
         public String getHiveTipState() {
-            //check this not sure it's correct
+            //check this, unsure it's correct
             String hiveTipState = "some_SIDE";
             //hiveTipState is either “GARDEN_SIDE” or “OPPOSITE_GARDEN”
             robot.limelight.pipelineSwitch(0);
@@ -112,7 +115,7 @@ import java.util.ArrayList;
                 }
 
             }
-
+            // :D
             return hiveTipState;
         }
 
